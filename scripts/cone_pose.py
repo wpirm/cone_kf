@@ -9,10 +9,11 @@ import rospy
 import tf
 from vision_msgs.msg import *
 
-class ConePose(object):
+class ConeTfBroadcaster(object):
     def __init__(self):
         self.camera_frame = rospy.get_param('~camera_frame')
         self.detection_topic = rospy.get_param('~detection_topic', default='yolo_predict/detection')
+        self.cone_coords = rospy.get_param('~cone_coords')
 
         self.detection_sub = rospy.Subscriber(self.detection_topic, Detection2DArray, self._detection_cb)
 
@@ -31,11 +32,14 @@ class ConePose(object):
                     rospy.Time.now(),
                     'cone_loc',
                     'map')
+    
+    def lowpass_filter(self, cone_detected, cone_gps):
+        pass
 
 if __name__ == '__main__':
     rospy.init_node('cone_tf_broadcaster')
 
     try:
-        cp = ConePose()
+        cp = ConeTfBroadcaster()
     except rospy.ROSInterruptException:
         pass
