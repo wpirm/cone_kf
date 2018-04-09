@@ -22,12 +22,15 @@ class ConePose(object):
         pass
 
     def _handle_transform(self, camera_frame, x_cord, y_cord):
+        t = tf.Transformer()
+        w2c_pos, w2c_quat = t.lookupTransform(camera_frame, 'map', t.getLatestCommonTime('map', camera_frame))
+
         br = tf.TransformBroadcaster()
-        br.sendTransform((x_cord, y_cord, 0),
-                    tf.transformations.quaternion_from_euler(0, 0, 0),
+        br.sendTransform((x_cord + w2c_pos[0], y_cord + w2c_pos[1], 0),
+                    w2c_quat,
                     rospy.Time.now(),
                     'cone_loc',
-                    camera_frame)
+                    'map')
 
 if __name__ == '__main__':
     rospy.init_node('cone_tf_broadcaster')
