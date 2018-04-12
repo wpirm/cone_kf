@@ -13,6 +13,7 @@ find_package(catkin REQUIRED COMPONENTS
   std_msgs
   sensor_msgs
   vision_msgs
+  message_generation
 )
 
 ## System dependencies are found with CMake's conventions
@@ -56,11 +57,10 @@ catkin_python_setup()
 # )
 
 ## Generate services in the 'srv' folder
-# add_service_files(
-#   FILES
-#   Service1.srv
-#   Service2.srv
-# )
+add_service_files(
+  FILES
+  ConeGPSPose.srv
+)
 
 ## Generate actions in the 'action' folder
 # add_action_files(
