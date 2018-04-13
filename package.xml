@@ -1,11 +1,11 @@
 <?xml version="1.0"?>
 <package format="2">
-  <name>cone_pose</name>
+  <name>wpirm_navigation</name>
   <version>1.0.0</version>
   <description>A particle filter for determining the pose of WPIRM cones.</description>
   <maintainer email="narosenberg@wpi.edu">Nathan Rosenberg</maintainer>
   <license>BSD</license>
-  <url type="website">https://github.com/wpirm/cone_pose</url>
+  <url type="website">https://github.com/wpirm/wpirm_navigation</url>
   <author email="narosenberg@wpi.edu">Nathan Rosenberg</author>
 
   <buildtool_depend>catkin</buildtool_depend>

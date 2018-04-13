@@ -12,12 +12,11 @@ import tf
 from math import pi, sin, cos
 from cv_bridge import CvBridge, CvBridgeError
 from vision_msgs.msg import Detection2DArray
-from actionlib_msgs.msg import GoalID, GoalStatusArray
-from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
 from std_msgs.msg import Header
 from sensor_msgs.msg import NavSatFix
 from geometry_msgs.msg import PoseWithCovarianceStamped, PoseStamped, Pose
 from tf.transformations import euler_from_quaternion, quaternion_from_euler
+from nav_msgs.msg import Odometry
 
 
 class ConeVisionPose(object):
@@ -30,28 +29,28 @@ class ConeVisionPose(object):
         self.image_width = None
         
         self.last_detection = Detection2DArray()
-        self.last_odom = PoseWithCovarianceStamped()
+        self.last_odom = Odometry()
         self.bridge = CvBridge()
         
-        self.detection_sub = rospy.Subscriber(self.detection_topic, NavSatFix, self._detection_cb)
-        self.odom_sub = rospy.Subscriber(self.odom_topic, PoseWithCovarianceStamped, self._odom_cb)
+        self.detection_sub = rospy.Subscriber(self.detection_topic, Detection2DArray, self._detection_cb)
+        self.odom_sub = rospy.Subscriber(self.odom_topic, Odometry, self._odom_cb)
 
         rate = rospy.Rate(10)
         last_detection = Detection2DArray()
         while not rospy.is_shutdown():
             cur_detection = self.last_detection
-            if cur_detection.header.stamp != last_detection.stamp:
-                self.get_cone_pose()
+            if cur_detection.header.stamp != last_detection.header.stamp:
+                self.get_cone_pose(cur_detection)
             last_detection = cur_detection
             rate.sleep()
 
     def _detection_cb(self, data):
-        self.last_detection = deepcopy(data)
+        self.last_detection = data
         if self.image_width == None:
             self.image_width = data.detections[0].source_img.width
 
     def _odom_cb(self, data):
-        self.last_odom = deepcopy(data)
+        self.last_odom = data
 
     def _handle_transform(self, camera_frame, x_cord, y_cord):
         t = tf.Transformer()
@@ -70,24 +69,24 @@ class ConeVisionPose(object):
         for i, detect in enumerate(detection.detections):
             depth_image = detect.source_img
             
-            x_center = detect.bbox.center.x
-            y_center = detect.bbox.center.y
-
+            x_center = int(detect.bbox.center.x)
+            y_center = int(detect.bbox.center.y)
             try:
                 cv_depth_image = self.bridge.imgmsg_to_cv2(depth_image, "16UC1")
             except CvBridgeError as e:
                 rospy.logerr(e)
 
-            center_pixel_depth = cv_depth_image[x_center, y_center]
+            center_pixel_depth = cv_depth_image[y_center, x_center]
             # dist_avg = self.depth_region(cv_depth_image, detect)
             distance = float(center_pixel_depth)
             
-            bearing = self.calculate_bearing(x_center, distance)
+            bearing, object_range = self.calculate_bearing(x_center, distance)
 
             cone_x = cos(bearing) * distance
             cone_y = sin(bearing) * distance
-
+            
             rospy.loginfo('Cone X: {} Cone Y: {}'.format(cone_x, cone_y))
+            
     
     def depth_region(self, depth_map, detection):
         # grab depths along a strip and take average
