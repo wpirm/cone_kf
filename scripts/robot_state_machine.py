@@ -5,133 +5,115 @@ import rospy
 import actionlib
 
 from smach import State,StateMachine
+from math import sqrt
 from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
 from geometry_msgs.msg import PoseWithCovarianceStamped, PoseArray
+from sensor_msgs.msg import NavSatFix, NavSatStatus
 from std_msgs.msg import Empty
+from wpirm_navigation.srv import *
 
-waypoints = []
-
-class FollowPath(State):
-    def __init__(self):
-        State.__init__(self, outcomes=['success'], input_keys=['waypoints'])
-        self.frame_id = rospy.get_param('~goal_frame_id','map')
-        # Get a move_base action client
-        self.client = actionlib.SimpleActionClient('move_base', MoveBaseAction)
-        rospy.loginfo('Connecting to move_base...')
-        self.client.wait_for_server()
-        rospy.loginfo('Connected to move_base.')
-
-    def execute(self, userdata):
-        global waypoints
-        # Execute waypoints each in sequence
-        for waypoint in waypoints:
-            # Break if preempted
-            if waypoints == []:
-                rospy.loginfo('The waypoint queue has been reset.')
-                break
-            # Otherwise publish next waypoint as goal
-            goal = MoveBaseGoal()
-            goal.target_pose.header.frame_id = self.frame_id
-            goal.target_pose.pose.position = waypoint.pose.pose.position
-            goal.target_pose.pose.orientation = waypoint.pose.pose.orientation
-            rospy.loginfo('Executing move_base goal to position (x,y): %s, %s' %
-                    (waypoint.pose.pose.position.x, waypoint.pose.pose.position.y))
-            rospy.loginfo("To cancel the goal: 'rostopic pub -1 /move_base/cancel actionlib_msgs/GoalID -- {}'")
-            self.client.send_goal(goal)
-            self.client.wait_for_result()
-        return 'success'
-
-def convert_PoseWithCovArray_to_PoseArray(waypoints):
-    """Used to publish waypoints as pose array so that you can see them in rviz, etc."""
-    poses = PoseArray()
-    poses.header.frame_id = 'map'
-    poses.poses = [pose.pose.pose for pose in waypoints]
-    return poses
-
-class GetPath(State):
-    def __init__(self):
-        State.__init__(self, outcomes=['success'], input_keys=['waypoints'], output_keys=['waypoints'])
-        # Create publsher to publish waypoints as pose array so that you can see them in rviz, etc.
-        self.poseArray_publisher = rospy.Publisher('/waypoints', PoseArray, queue_size=1)
-
-        # Start thread to listen for reset messages to clear the waypoint queue
-        def wait_for_path_reset():
-            """thread worker function"""
-            global waypoints
-            while not rospy.is_shutdown():
-                data = rospy.wait_for_message('/path_reset', Empty)
-                rospy.loginfo('Recieved path RESET message')
-                self.initialize_path_queue()
-                rospy.sleep(3) # Wait 3 seconds because `rostopic echo` latches
-                               # for three seconds and wait_for_message() in a
-                               # loop will see it again.
-        reset_thread = threading.Thread(target=wait_for_path_reset)
-        reset_thread.start()
-
-    def initialize_path_queue(self):
-        global waypoints
-        waypoints = [] # the waypoint queue
-        # publish empty waypoint queue as pose array so that you can see them the change in rviz, etc.
-        self.poseArray_publisher.publish(convert_PoseWithCovArray_to_PoseArray(waypoints))
-
-    def execute(self, userdata):
-        global waypoints
-        self.initialize_path_queue()
-        self.path_ready = False
-
-        # Start thread to listen for when the path is ready (this function will end then)
-        def wait_for_path_ready():
-            """thread worker function"""
-            data = rospy.wait_for_message('/path_ready', Empty)
-            rospy.loginfo('Recieved path READY message')
-            self.path_ready = True
-        ready_thread = threading.Thread(target=wait_for_path_ready)
-        ready_thread.start()
-
-        topic = "/initialpose"
-        rospy.loginfo("Waiting to recieve waypoints via Pose msg on topic %s" % topic)
-        rospy.loginfo("To start following waypoints: 'rostopic pub /path_ready std_msgs/Empty -1'")
-
-        # Wait for published waypoints
-        while not self.path_ready:
-            try:
-                pose = rospy.wait_for_message(topic, PoseWithCovarianceStamped, timeout=1)
-            except rospy.ROSException as e:
-                if 'timeout exceeded' in e.message:
-                    continue  # no new waypoint within timeout, looping...
-                else:
-                    raise e
-            rospy.loginfo("Recieved new waypoint")
-            waypoints.append(pose)
-            # publish waypoint queue as pose array so that you can see them in rviz, etc.
-            self.poseArray_publisher.publish(convert_PoseWithCovArray_to_PoseArray(waypoints))
-
-        # Path is ready! return success and move on to the next state (FOLLOW_PATH)
-        return 'success'
-
-class PathComplete(State):
+# TODO: Setup
+class GPSFix(State):
     def __init__(self):
         State.__init__(self, outcomes=['success'])
+        self.gps_topic = rospy.get_param('~gps_topic', default='fix')
 
+        self.last_gps = NavSatFix()
+
+        self.gps_sub = rospy.Subscriber(self.gps_topic, NavSatFix, self._gps_cb)
+    
     def execute(self, userdata):
-        rospy.loginfo('###############################')
-        rospy.loginfo('##### REACHED FINISH GATE #####')
-        rospy.loginfo('###############################')
+        while self.last_gps.status.status <= self.last_gps.status.STATUS_FIX:
+            rospy.sleep(0.1)
         return 'success'
 
-def main():
-    rospy.init_node('follow_waypoints')
+    def _gps_cb(self, data):
+        self.last_gps = data
 
-    sm = StateMachine(outcomes=['success'])
+class NavToCone(State):
+    def __init__(self):
+        State.__init__(self, outcomes=['success'], input_keys=['waypoints', 'cur_waypoint_in'])
+        self.odom_topic = rospy.get_param('~odom_topic', default='odom')
+        
+        self.pose = PoseWithCovarianceStamped()
+        
+        self.odom_sub = rospy.Subscriber(self.odom_topic, PoseWithCovarianceStamped, self._odom_cb)
+        
+        self.client = actionlib.SimpleActionClient('move_base', MoveBaseAction)
+        self.client.wait_for_server()
+    
+    def execute(self, userdata):
+        rate = rospy.Rate(10)  # Set the rate at which new nav goals are given
+        at_waypoint = False
+
+        lat = userdata.waypoints[userdata.cur_waypoint_in][0]
+        lon = userdata.waypoints[userdata.cur_waypoint_in][1]
+
+        while not at_waypoint:
+            cone_gps_srv = rospy.ServiceProxy('cone_gps_pose', ConeGPSPose)
+            goal = cone_gps_srv(ConeGPSPoseRequest(lat, lon)).cone_loc
+
+            rospy.loginfo('Executing move_base goal to position (x,y): %s, %s' %
+                    (goal.pose.position.x, goal.pose.position.y))
+            rospy.loginfo("To cancel the goal: 'rostopic pub -1 /move_base/cancel actionlib_msgs/GoalID -- {}".format(userdata.cur_waypoint_in))
+            self.client.send_goal(goal)
+            self.client.wait_for_result()
+            
+            rate.sleep()
+    
+    def _odom_cb(self, data):
+        self.pose = data
+    
+    def euclidean_distance(self, goal_pose):
+        """Euclidean distance between current pose and the goal."""
+        return sqrt(pow((goal_pose.pose.position.x - self.pose.position.x), 2) +
+                    pow((goal_pose.position.y - self.pose.position.y), 2))
+
+class TouchCone(State):
+    def __init__(self):
+        State.__init__(self, outcomes=['success', 'fail', 'last_cone'], input_keys=['waypoints', 'cur_waypoint_in', 'last_waypoint'])
+    
+    def execute(self, userdata):
+        pass
+
+class FailTouch(State):
+    def __init__(self):
+        State.__init__(self, outcomes=['success'])
+    
+    def execute(self, userdata):
+        pass
+
+class ResetCone(State):
+    def __init__(self):
+        State.__init__(self, outcomes=['success'], input_keys=['cur_waypoint_in'], output_keys=['cur_waypoint_out'])
+    
+    def execute(self, userdata):
+        pass
+
+def main():
+    rospy.init_node('wpirm_state_machine')
+
+    sm = StateMachine(outcomes=['stop'])
+    sm.userdata.waypoints = rospy.get_param('~waypoints')
+    sm.userdata.cur_waypoint = 0
+    sm.userdata.last_waypoint = rospy.get_param('~last_waypoint', default=3)
 
     with sm:
-        StateMachine.add('GET_PATH', GetPath(),
-                           transitions={'success':'FOLLOW_PATH'},
-                           remapping={'waypoints':'waypoints'})
-        StateMachine.add('FOLLOW_PATH', FollowPath(),
-                           transitions={'success':'PATH_COMPLETE'},
-                           remapping={'waypoints':'waypoints'})
-        StateMachine.add('PATH_COMPLETE', PathComplete(),
-                           transitions={'success':'GET_PATH'})
+        StateMachine.add('GPS_FIX', GPSFix(),
+                           transitions={'success':'NAV_TO_CONE'})
+        StateMachine.add('NAV_TO_CONE', NavToCone(),
+                           transitions={'success':'TOUCH_CONE'},
+                           remapping={'waypoints':'waypoints', 'cur_waypoint_in':'cur_waypoint'})
+        StateMachine.add('TOUCH_CONE', TouchCone(),
+                           transitions={'success':'RESET_CONE', 'fail':'FAIL_TOUCH', 'last_cone':'stop'},
+                           remapping={'cur_waypoint_in':'cur_waypoint', 'last_waypoint':'last_waypoint'})
+        StateMachine.add('FAIL_TOUCH', FailTouch(),
+                           transitions={'success':'TOUCH_CONE'})
+        StateMachine.add('RESET_CONE', ResetCone(),
+                           transitions={'success':'NAV_TO_CONE'},
+                           remapping={'cur_waypoint_in':'cur_waypoint', 'cur_waypoint_out':'cur_waypoint'})
 
     outcome = sm.execute()
+
+if __name__ == '__main__':
+    main()
