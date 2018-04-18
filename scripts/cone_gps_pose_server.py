@@ -36,10 +36,10 @@ class ConeGPSPoseServer(object):
         s.spin()
 
     def _gps_cb(self, data):
-        self.last_gps = deepcopy(data)
+        self.last_gps = data
 
     def _odom_cb(self, data):
-        self.last_odom = deepcopy(data)
+        self.last_odom = data
 
     def _handle_transform(self, cone, x_cord, y_cord):
         t = tf.Transformer()
