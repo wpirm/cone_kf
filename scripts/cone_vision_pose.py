@@ -9,7 +9,7 @@ from copy import deepcopy
 import rospy
 import actionlib
 import tf
-from math import pi, sin, cos, radians
+from math import pi, sin, cos, radians, isinf, isnan
 from cv_bridge import CvBridge, CvBridgeError
 from vision_msgs.msg import Detection2DArray
 from std_msgs.msg import Header
@@ -41,7 +41,9 @@ class ConeVisionPose(object):
             cur_detection = self.last_detection
             if cur_detection.header.stamp != last_detection.header.stamp:
                 x, y = self.get_cone_pose(cur_detection)
-                self._handle_transform(self.camera_frame, x, y)
+                rospy.loginfo('x: {} y: {}'.format(x,y))
+                if x and y != None:
+                    self._handle_transform(self.camera_frame, x, y)
             last_detection = cur_detection
             rate.sleep()
 
@@ -64,8 +66,8 @@ class ConeVisionPose(object):
     def get_cone_pose(self, detection):
         cone_poses = []
 
-        cone_x = None
-        cone_y = None
+        cone_x = 0.0
+        cone_y = 0.0
 
         for i, detect in enumerate(detection.detections):
             depth_image = detect.source_img
@@ -78,13 +80,17 @@ class ConeVisionPose(object):
                 center_pixel_depth = cv_depth_image[y_center, x_center]
                 # dist_avg = self.depth_region(cv_depth_image, detect)
                 distance = float(center_pixel_depth)
+                if isinf(distance) or isnan(distance):
+                    cone_x = None
+                    cone_y = None
                 
-                bearing, object_range = self.calculate_bearing(img_width, x_center, distance)
+                else:                
+                    bearing, object_range = self.calculate_bearing(img_width, x_center, distance)
 
-                cone_y = cos(radians(bearing)) * center_pixel_depth
-                cone_x = sin(radians(bearing)) * center_pixel_depth
-                
-                # rospy.loginfo('Bearing: {} Depth: {}'.format(bearing, center_pixel_depth))
+                    cone_y = cos(radians(bearing)) * center_pixel_depth
+                    cone_x = sin(radians(bearing)) * center_pixel_depth
+                    
+                    rospy.loginfo('Bearing: {} Depth: {}'.format(bearing, center_pixel_depth))
             except CvBridgeError as e:
                 rospy.logerr(e)
 
@@ -127,7 +133,7 @@ class ConeVisionPose(object):
         # Measured from center of image.
         # Positive x is to the right, positive y is upwards
         obj_x = ((img_width / 2.0) - object_x) * -1
-        # rospy.loginfo('Object X: {}'.format(img_width))
+        rospy.loginfo('Object X: {}'.format(img_width))
 
         # Calculate angle of object in relation to center of image
         bearing = obj_x*horiz_res        # degrees

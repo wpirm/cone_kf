@@ -34,10 +34,13 @@ class NavToCone(State):
     def __init__(self):
         State.__init__(self, outcomes=['success'], input_keys=['waypoints', 'cur_waypoint_in'])
         self.odom_topic = rospy.get_param('~odom_topic', default='odom')
+        self.gps_topic = rospy.get_param('~gps_topic', default='fix')
         
         self.pose = PoseWithCovarianceStamped()
+        self.last_gps = NavSatFix()
         
         self.odom_sub = rospy.Subscriber(self.odom_topic, PoseWithCovarianceStamped, self._odom_cb)
+        self.gps_sub = rospy.Subscriber(self.gps_topic, NavSatFix, self._gps_cb)
         
         self.client = actionlib.SimpleActionClient('move_base', MoveBaseAction)
         self.client.wait_for_server()
@@ -49,25 +52,39 @@ class NavToCone(State):
         lat = userdata.waypoints[userdata.cur_waypoint_in][0]
         lon = userdata.waypoints[userdata.cur_waypoint_in][1]
 
-        while not at_waypoint:
-            cone_gps_srv = rospy.ServiceProxy('cone_gps_pose', ConeGPSPose)
-            goal = cone_gps_srv(ConeGPSPoseRequest(lat, lon)).cone_loc
+        cone_gps_srv = rospy.ServiceProxy('cone_gps_pose', ConeGPSPose)
+        goal = cone_gps_srv(ConeGPSPoseRequest(lat, lon)).cone_loc
 
-            rospy.loginfo('Executing move_base goal to position (x,y): %s, %s' %
-                    (goal.pose.position.x, goal.pose.position.y))
-            rospy.loginfo("To cancel the goal: 'rostopic pub -1 /move_base/cancel actionlib_msgs/GoalID -- {}".format(userdata.cur_waypoint_in))
-            self.client.send_goal(goal)
-            self.client.wait_for_result()
+        rospy.loginfo('Executing move_base goal to position (x,y): %s, %s' % (goal.pose.position.x, goal.pose.position.y))
+        rospy.loginfo("To cancel the goal: 'rostopic pub -1 /move_base/cancel actionlib_msgs/GoalID -- {}".format(userdata.cur_waypoint_in))
+        self.client.send_goal(goal)
+        self.client.wait_for_result()
+        return 'success'
+
+        # while not at_waypoint:
+        #     # Test to see if we have a gps fix or not
+        #     if self.last_gps.status.status >= self.last_gps.status.STATUS_FIX:
+        #         cone_gps_srv = rospy.ServiceProxy('cone_gps_pose', ConeGPSPose)
+        #         goal = cone_gps_srv(ConeGPSPoseRequest(lat, lon)).cone_loc
+
+        #         rospy.loginfo('Executing move_base goal to position (x,y): %s, %s' %
+        #                 (goal.pose.position.x, goal.pose.position.y))
+        #         rospy.loginfo("To cancel the goal: 'rostopic pub -1 /move_base/cancel actionlib_msgs/GoalID -- {}".format(userdata.cur_waypoint_in))
+        #         self.client.send_goal(goal)
+        #         self.client.wait_for_result()
             
-            rate.sleep()
+        #     rate.sleep()
     
     def _odom_cb(self, data):
         self.pose = data
     
-    def euclidean_distance(self, goal_pose):
-        """Euclidean distance between current pose and the goal."""
-        return sqrt(pow((goal_pose.pose.position.x - self.pose.position.x), 2) +
-                    pow((goal_pose.position.y - self.pose.position.y), 2))
+    def _gps_cb(self, data):
+        self.last_gps = data
+    
+    def euclidean_distance(self, start_pose, goal_pose):
+        """Euclidean distance between a start pose and the goal."""
+        return sqrt(pow((goal_pose.pose.position.x - start_pose.pose.position.x), 2) +
+                    pow((goal_pose.position.y - start_pose.pose.position.y), 2))
 
 class TouchCone(State):
     def __init__(self):
