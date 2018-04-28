@@ -1,4 +1,5 @@
 <launch>
+    
     <node pkg="wpirm_navigation" name="cone_vision_pose" type="cone_vision_pose.py" output="screen">
         <param name="camera_frame" type="str" value="" />
         <param name="detection_topic" type="str" value="/yolov2_ros/detection" />
