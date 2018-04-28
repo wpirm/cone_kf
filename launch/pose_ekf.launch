@@ -1,4 +1,3 @@
- <launch>
 <launch>
   <node pkg="robot_localization" type="ekf_localization_node" name="ekf_se" clear_params="true">
     <rosparam command="load" file="$(find wpirm_navigation)/conf/ekf.yaml" />
@@ -7,7 +6,6 @@
     <remap from="accel/filtered" to="/accel"/>
 
   </node>
-</launch>
     <remap from="vo" to="gps_meas" />
     <node name="gps_conv" pkg="gps_common" type="utm_odometry_node">
         <remap from="odom" to="vo"/>
