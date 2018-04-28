@@ -4,6 +4,7 @@
         <param name="baud" value="57600"/>
     </node>
 
+    <include file="$(find wpirm_navigation)/launch/imu.launch" />
     <include file="$(find wpirm_navigation)/launch/pose_ekf.launch" />
     
     <!-- <include file="$(find wpirm_navigation)/launch/rtabmap.launch" /> -->
