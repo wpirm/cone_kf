@@ -4,12 +4,12 @@ port: /dev/ttyACM1
 
 ##### Calibration ####
 ### accelerometer
-accel_x_min: -250.0
-accel_x_max: 250.0
-accel_y_min: -250.0
-accel_y_max: 250.0
-accel_z_min: -250.0
-accel_z_max: 250.0
+accel_x_min: -310.67
+accel_x_max: 285.03
+accel_y_min: -304.69
+accel_y_max: 292.0
+accel_z_min: -310.30
+accel_z_max: 320.31
 
 ### magnetometer
 # standard calibration
@@ -29,6 +29,6 @@ magn_ellipsoid_transform: [[0.927149, 0.000591056, 0.0333716], [0.000591056, 0.9
 imu_yaw_calibration: 0.0
 
 ### gyroscope
-gyro_average_offset_x: 0.0
-gyro_average_offset_y: 0.0
-gyro_average_offset_z: 0.0
+gyro_average_offset_x: -0.01
+gyro_average_offset_y: -0.01
+gyro_average_offset_z: -0.01
